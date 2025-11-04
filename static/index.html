@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Unauthorized Device Detector — Demo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* tiny toast styling */
+    #toast { position: fixed; right: 1rem; top: 1rem; z-index: 50; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+  <nav class="bg-white shadow p-4">
+    <div class="container mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <svg class="w-8 h-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a1 1 0 0 0-.894.553L7.618 11H4a1 1 0 1 0 0 2h4a1 1 0 0 0 .894-.553L12 4l3.106 8.447A1 1 0 0 0 16 13h4a1 1 0 1 0 0-2h-3.618L12.894 2.553A1 1 0 0 0 12 2z"/></svg>
+        <h1 class="text-xl font-semibold">Unauthorized Device Detector</h1>
+      </div>
+      <div class="text-sm text-slate-600">Network: <span id="net"></span></div>
+    </div>
+  </nav>
+
+  <main class="container mx-auto p-6">
+    <div class="flex gap-4 items-center">
+      <button id="scanBtn" class="px-4 py-2 bg-indigo-600 text-white rounded shadow">Scan Now</button>
+      <div class="text-sm text-slate-600">Last: <span id="last">—</span></div>
+      <div class="ml-auto text-sm">Local IP: <span id="localIp" class="font-medium"></span></div>
+    </div>
+
+    <section class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="col-span-1 md:col-span-3">
+        <div class="bg-white shadow rounded p-4">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-medium">Connected devices</h2>
+            <div class="text-sm text-slate-500">Auto-refresh every 3s</div>
+          </div>
+
+          <div id="devicesList" class="grid gap-3"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- toast container -->
+  <div id="toast"></div>
+
+<script>
+const API = "/api";
+let prevUnknownSet = new Set();
+let polling = null;
+
+function showToast(msg) {
+  const t = document.createElement("div");
+  t.className = "bg-indigo-600 text-white px-4 py-2 rounded shadow mb-2 animate-fade";
+  t.innerText = msg;
+  document.getElementById("toast").appendChild(t);
+  setTimeout(() => { t.remove(); }, 4000);
+}
+
+async function fetchDevices() {
+  try {
+    const res = await fetch(API + "/devices");
+    const json = await res.json();
+    document.getElementById("net").innerText = json.network;
+    document.getElementById("last").innerText = new Date(json.timestamp).toLocaleString();
+    document.getElementById("localIp").innerText = json.local_ip || "—";
+    renderDevices(json.devices);
+  } catch(err) {
+    console.error("Fetch error:", err);
+  }
+}
+
+function renderDevices(devices) {
+  // sort: local device first, then authorized, then unknown
+  devices.sort((a,b) => {
+    if (a.is_local && !b.is_local) return -1;
+    if (!a.is_local && b.is_local) return 1;
+    if (a.status === b.status) return a.ip.localeCompare(b.ip);
+    return a.status === "AUTHORIZED" ? -1 : 1;
+  });
+
+  const container = document.getElementById("devicesList");
+  container.innerHTML = "";
+
+  const unknownSet = new Set();
+
+  devices.forEach(d => {
+    const card = document.createElement("div");
+    card.className = "p-4 rounded border flex items-center justify-between";
+    if (d.is_local) card.classList.add("border-indigo-300", "bg-indigo-50");
+    else if (d.status === "AUTHORIZED") card.classList.add("border-green-200", "bg-green-50");
+    else card.classList.add("border-red-200", "bg-red-50");
+
+    const left = document.createElement("div");
+    left.innerHTML = `<div class="text-sm text-slate-500">${d.is_local ? "This device" : d.ip}</div>
+                      <div class="font-medium">${d.mac || "-"}</div>
+                      <div class="text-xs text-slate-500">${d.hostname || ""}</div>`;
+
+    const right = document.createElement("div");
+    right.className = "flex items-center gap-2";
+
+    const badge = document.createElement("span");
+    badge.className = "text-xs px-2 py-1 rounded font-semibold";
+    badge.innerText = d.status;
+    badge.style.whiteSpace = "nowrap";
+    if (d.status === "AUTHORIZED") {
+      badge.classList.add("bg-green-600", "text-white");
+    } else {
+      badge.classList.add("bg-red-600", "text-white");
+      if (d.mac) unknownSet.add(d.mac);
+    }
+
+    right.appendChild(badge);
+
+    if (!d.is_local && d.status === "UNKNOWN" && d.mac) {
+      const allowBtn = document.createElement("button");
+      allowBtn.className = "px-3 py-1 bg-indigo-600 text-white rounded text-sm";
+      allowBtn.innerText = "Whitelist";
+      allowBtn.onclick = () => doAllow(d.mac);
+      right.appendChild(allowBtn);
+    }
+
+    card.appendChild(left);
+    card.appendChild(right);
+    container.appendChild(card);
+  });
+
+  // toast when new unknown devices appear
+  for (let mac of unknownSet) {
+    if (!prevUnknownSet.has(mac)) {
+      showToast("New unknown device detected: " + mac);
+    }
+  }
+  prevUnknownSet = unknownSet;
+}
+
+async function doAllow(mac) {
+  try {
+    await fetch(API + "/allow", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({mac})
+    });
+    showToast("Whitelisted: " + mac);
+    // refresh immediately
+    fetchDevices();
+  } catch(e) {
+    console.error(e);
+    alert("Failed to whitelist");
+  }
+}
+
+document.getElementById("scanBtn").addEventListener("click", fetchDevices);
+
+// start polling
+fetchDevices();
+polling = setInterval(fetchDevices, 3000);
+</script>
+
+</body>
+</html>
