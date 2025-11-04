@@ -41,14 +41,15 @@ cd "C:\Users\jayan\OneDrive\Desktop\CN project\Unauthorized-Device-Detector"
 python app.py
 
 ```
+# Step 4: Open your browser and go to:
+http://127.0.0.1:5000/
+
+# You will now see a live dashboard displaying connected devices.
+# Unknown devices will appear as 'Unauthorized' and can be whitelisted.
+
 ##Authors
 ```bash
 #Aanya Patni 24BCE1897
 #Palak Malapani 24BCE5268
 #Jayant Bedi 24BCE1832
 ```
-# Step 4: Open your browser and go to:
-http://127.0.0.1:5000/
-
-# You will now see a live dashboard displaying connected devices.
-# Unknown devices will appear as 'Unauthorized' and can be whitelisted.
